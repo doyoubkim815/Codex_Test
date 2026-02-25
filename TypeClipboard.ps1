@@ -11,14 +11,47 @@ param(
     [int]$TabSpaces = 4
 )
 
+function Convert-BoundParametersToArgumentList {
+    param(
+        [System.Collections.IDictionary]$BoundParameters
+    )
+
+    $argumentList = @()
+
+    foreach ($entry in $BoundParameters.GetEnumerator()) {
+        $name = "-$($entry.Key)"
+        $value = $entry.Value
+
+        if ($value -is [System.Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) {
+                $argumentList += $name
+            }
+            continue
+        }
+
+        $argumentList += $name
+        $argumentList += [string]$value
+    }
+
+    return $argumentList
+}
+
 # --- STA 보장(클립보드 접근 안정성) ---
 try {
-    if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
+    if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA' -and $PSCommandPath) {
         $ps51 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $relaunchArgs = @(
+            '-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',$PSCommandPath
+        ) + (Convert-BoundParametersToArgumentList -BoundParameters $PSBoundParameters)
+
         if (Test-Path $ps51) {
-            Start-Process -FilePath $ps51 -ArgumentList @(
-                '-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',"`"$PSCommandPath`""
-            )
+            Start-Process -FilePath $ps51 -ArgumentList $relaunchArgs
+            exit
+        }
+
+        $currentShellPath = (Get-Process -Id $PID).Path
+        if ($currentShellPath) {
+            Start-Process -FilePath $currentShellPath -ArgumentList $relaunchArgs
             exit
         }
     }
@@ -135,6 +168,7 @@ public static class Typer {
 
 Write-Host ""
 Write-Host "클립보드 문자 수: $($text.Length)"
+Write-Host "사용법: 텍스트를 Ctrl+C로 복사한 뒤, 이 파일을 우클릭해 'PowerShell에서 실행'을 누르세요."
 Write-Host "입력 시작까지 $StartDelaySec 초. 지금부터 $StartDelaySec 초 안에 입력칸에 커서를 두세요."
 
 for ($i = $StartDelaySec; $i -ge 1; $i--) {
